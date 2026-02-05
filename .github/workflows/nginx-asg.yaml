@@ -126,11 +126,4 @@ jobs:
             --max-attempts 30 \
             --delay 10
 
-          # 실행 결과 확인 (인스턴스별 상태 및 출력 로그)
-          echo "Checking command execution status..."
-          aws ssm list-command-invocations \
-            --command-id "$COMMAND_ID" \
-            --region ${{ secrets.AWS_REGION }} \
-            --details \
-            --query 'CommandInvocations[*].[InstanceId,Status,CommandPlugins[0].Output]' \
-            --output text
+       
