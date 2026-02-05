@@ -67,11 +67,21 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Dockerfile 위치가 ./nginx/Dockerfile 이라고 가정 (컨텍스트는 ./nginx)
-          # 만약 html 폴더가 nginx 폴더 안에 있다면 경로는 ./nginx 가 맞음
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./nginx
+          # Dockerfile이 어디 있는지 찾아서 변수에 넣음 (개꿀팁)
+          DOCKERFILE_PATH=$(find . -name Dockerfile | head -n 1)
+          BUILD_CONTEXT=$(dirname $DOCKERFILE_PATH)
+          
+          echo "Found Dockerfile at: $DOCKERFILE_PATH"
+          echo "Building context: $BUILD_CONTEXT"
+
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+                       $BUILD_CONTEXT
+                       
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+
 
       # -------------------------------------------------------------------------
       # Step 5: SSM을 통해 ASG의 모든 EC2 인스턴스에 배포
