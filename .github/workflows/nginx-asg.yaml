@@ -1,8 +1,88 @@
-      # (앞부분 생략...)
-      
+# =============================================================================
+# Nginx Auto Scaling Group 배포 파이프라인
+# =============================================================================
+# 목적: nginx 디렉토리의 변경사항을 감지하여 ECR에 Docker 이미지를 빌드/푸시하고,
+#      ASG의 모든 EC2 인스턴스에 자동으로 배포합니다.
+#
+# 트리거: ci/asg 브랜치의 nginx/** 경로에 push 또는 PR 생성 시 실행
+# 배포 대상: ASG_TAG_KEY=ASG_TAG_VALUE 태그를 가진 모든 EC2 인스턴스
+# =============================================================================
+
+name: Nginx-ASG-Pipeline
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "nginx/**" # nginx 디렉토리 변경 시만 실행
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "nginx/**"
+  workflow_dispatch: # GitHub UI에서 수동 실행 가능
+
+permissions:
+  contents: read
+
+jobs:
+  # =============================================================================
+  # Job: 빌드 및 배포
+  # =============================================================================
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------------------------
+      # Step 1: 코드 체크아웃
+      # -------------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -------------------------------------------------------------------------
+      # Step 2: AWS 자격 증명 설정
+      # -------------------------------------------------------------------------
+      # 필요한 Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # -------------------------------------------------------------------------
+      # Step 3: Amazon ECR 로그인
+      # -------------------------------------------------------------------------
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # -------------------------------------------------------------------------
+      # Step 4: Docker 이미지 빌드 및 ECR에 푸시
+      # -------------------------------------------------------------------------
+      # 이미지 태그: 커밋 해시(고유) + latest
+      # 이미지에 포함: nginx.conf, default.conf, index.html 등 모든 정적 파일
+      - name: Build and push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Dockerfile 위치가 ./nginx/Dockerfile 이라고 가정 (컨텍스트는 ./nginx)
+          # 만약 html 폴더가 nginx 폴더 안에 있다면 경로는 ./nginx 가 맞음
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./nginx
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
       # -------------------------------------------------------------------------
       # Step 5: SSM을 통해 ASG의 모든 EC2 인스턴스에 배포
       # -------------------------------------------------------------------------
+      # 필요한 Secrets: ASG_TAG_KEY, ASG_TAG_VALUE
+      # 예: ASG_TAG_KEY=Name, ASG_TAG_VALUE=sonic-nginx-asg
+      #
+      # 동작 과정:
+      # 1) 특정 태그를 가진 모든 EC2 인스턴스를 대상으로 SSM 명령 전송
+      # 2) 각 EC2에서 ECR 로그인 → 이미지 pull → 컨테이너 실행
+      # 3) (중요) 명령 전송 후 즉시 종료 (비동기 실행)
       - name: Deploy to ASG via SSM
         run: |
           # 배포할 이미지 정보
@@ -12,6 +92,7 @@
           FULL_IMAGE="$REGISTRY/$REPO:$TAG"
 
           # SSM 명령 전송 (특정 태그를 가진 모든 EC2 대상)
+          # 주의: JSON 파라미터 내의 따옴표는 이스케이프(\") 처리 필수
           COMMAND_ID=$(aws ssm send-command \
             --targets "Key=tag:${{ secrets.ASG_TAG_KEY }},Values=${{ secrets.ASG_TAG_VALUE }}" \
             --document-name "AWS-RunShellScript" \
@@ -25,7 +106,7 @@
                 \"# 새 이미지 pull\",
                 \"sudo docker pull $FULL_IMAGE\",
 
-                \"# 기존 컨테이너 중지 및 삭제\",
+                \"# 기존 컨테이너 중지 및 삭제 (에러 무시)\",
                 \"sudo docker stop nginx-server || true\",
                 \"sudo docker rm nginx-server || true\",
 
@@ -40,12 +121,4 @@
             --output text)
 
           echo "✅ 배포 명령(SSM) 전송 완료! Command ID: $COMMAND_ID"
-          echo "🚀 각 EC2 인스턴스에서 백그라운드로 배포가 진행됩니다."
-
-          # [삭제됨] 아래 wait 명령어는 단일 인스턴스용이라 에러 유발함. 삭제 또는 주석 처리.
-          # echo "Waiting for SSM command $COMMAND_ID to complete..."
-          # aws ssm wait command-executed \
-          #   --command-id "$COMMAND_ID" \
-          #   --region ${{ secrets.AWS_REGION }} \
-          #   --max-attempts 30 \
-          #   --delay 10
+          echo "🚀 각 EC2 인스턴스에서 백그라운드로 배포가 진행됩니다. (GitHub Actions 종료)"
