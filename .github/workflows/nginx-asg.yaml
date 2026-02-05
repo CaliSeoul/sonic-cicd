@@ -5,7 +5,7 @@
 #      ASG의 모든 EC2 인스턴스에 자동으로 배포합니다.
 #
 # 트리거: ci/asg 브랜치의 nginx/** 경로에 push 또는 PR 생성 시 실행
-# 배포 대상: ASG_TAG_KEY=ASG_TAG_VALUE 태그를 가진 모든 EC2 인스턴스
+# 배포 대상: ASG_TAG_KEY=ASG_TAG_VALUE 태그를 가진 모든 EC2 인스턴스 Name sonic-asg
 # =============================================================================
 
 name: Nginx-ASG-Pipeline
