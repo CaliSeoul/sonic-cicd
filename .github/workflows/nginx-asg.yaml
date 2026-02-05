@@ -12,11 +12,11 @@ name: Nginx-ASG-Pipeline
 
 on:
   push:
-    branches: ["ci/asg"]
+    branches: ["main"]
     paths:
       - "nginx/**" # nginx 디렉토리 변경 시만 실행
   pull_request:
-    branches: ["ci/asg"]
+    branches: ["main"]
     paths:
       - "nginx/**"
   workflow_dispatch: # GitHub UI에서 수동 실행 가능
